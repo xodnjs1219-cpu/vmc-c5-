@@ -34,28 +34,33 @@ Use the Task tool to launch the database_writer agent for this phase:
 Task(
   subagent_type="database_writer",
   description="Generate database schema",
-  prompt="/docs/prd.md, /docs/userflow.md를 기반으로 데이터베이스 스키마를 설계하고 /docs/database.md와 migration SQL을 생성해주세요."
+  prompt="/docs/prd.md, /docs/userflow.md, 그리고 /docs/external/ 디렉토리의 모든 파일을 참조하여 데이터베이스 스키마를 설계하고 /docs/database.md와 migration SQL을 생성해주세요. 외부 서비스 연동이 필요한 경우 해당 데이터 요구사항도 스키마에 반영해주세요."
 )
 ```
 
 **Inputs:**
 - `/docs/prd.md` - Product requirements document
 - `/docs/userflow.md` - User flow documentation
+- `/docs/external/[service].md` - External service integration specs (if exists)
 
 **Process:**
-1. Identify data entities explicitly mentioned in user flow
-2. Create high-level data flow diagram
-3. Design PostgreSQL schema with minimal fields
-4. Generate migration SQL
+1. Read all files in `/docs/external/` directory to identify external service requirements
+2. Identify data entities explicitly mentioned in user flow
+3. Create high-level data flow diagram (including external service data flows)
+4. Design PostgreSQL schema with minimal fields
+5. Consider external service data requirements when designing schema
+6. Generate migration SQL
 
 **Outputs:**
 - `/docs/database.md` - Data flow + schema documentation
 - `/supabase/migrations/*.sql` - Migration files
 
 **Key Guidelines:**
-- Include ONLY data explicitly in user flow
+- **MUST read all files in `/docs/external/` directory before designing schema**
+- Include ONLY data explicitly in user flow or required by external services
+- Consider external service data requirements (API responses, webhook payloads, etc.)
 - Use PostgreSQL-specific features appropriately
-- Present data flow before detailed schema
+- Present data flow before detailed schema (including external service interactions)
 - Keep schema minimal for MVP
 
 **Agent Benefits:**
