@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 export const PlaceParamsSchema = z.object({
-  placeId: z.string().uuid(),
+  placeId: z.string().min(1),
 });
 
 export const ReviewItemSchema = z.object({
@@ -14,7 +14,7 @@ export const ReviewItemSchema = z.object({
 });
 
 export const PlaceDetailSchema = z.object({
-  id: z.string().uuid(),
+  id: z.string().min(1),
   name: z.string(),
   address: z.string(),
   category: z.string(),
