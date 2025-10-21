@@ -40,6 +40,10 @@ export async function searchPlaces(
     });
 
     if (!responseValidation.success) {
+      console.error('Response validation failed:', {
+        errors: responseValidation.error.errors,
+        results: JSON.stringify(results, null, 2),
+      });
       return {
         success: false,
         error: SEARCH_ERRORS.SEARCH_RESPONSE_INVALID,

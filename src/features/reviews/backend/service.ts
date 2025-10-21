@@ -40,6 +40,10 @@ export async function createReview(
       if (placeInfo) {
         const placeValidation = PlaceInfoSchema.safeParse(placeInfo);
         if (!placeValidation.success) {
+          console.error('Place info validation failed:', {
+            errors: placeValidation.error.errors,
+            placeInfo,
+          });
           return {
             success: false,
             error: REVIEW_ERRORS.PLACE_NOT_FOUND,
@@ -64,6 +68,11 @@ export async function createReview(
           .single();
 
         if (createError || !newPlace) {
+          console.error('Place creation failed:', {
+            error: createError,
+            placeId,
+            placeData,
+          });
           return {
             success: false,
             error: REVIEW_ERRORS.PLACE_NOT_FOUND,
@@ -72,6 +81,7 @@ export async function createReview(
         }
         place = newPlace;
       } else {
+        console.error('Place not found and no placeInfo provided:', { placeId });
         return {
           success: false,
           error: REVIEW_ERRORS.PLACE_NOT_FOUND,

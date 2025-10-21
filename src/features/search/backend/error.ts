@@ -17,6 +17,11 @@ export const SEARCH_ERRORS = {
     message: '검색 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요',
     statusCode: 500,
   },
+  SEARCH_AUTH_ERROR: {
+    code: 'SEARCH_AUTH_ERROR',
+    message: '네이버 API 인증 오류가 발생했습니다. 관리자에게 문의하세요',
+    statusCode: 500,
+  },
   SEARCH_TIMEOUT_ERROR: {
     code: 'SEARCH_TIMEOUT_ERROR',
     message: '요청 시간이 초과되었습니다',

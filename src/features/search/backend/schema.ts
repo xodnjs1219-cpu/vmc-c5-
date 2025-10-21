@@ -9,10 +9,10 @@ export const SearchQuerySchema = z
 export const SearchResultItemSchema = z.object({
   name: z.string().min(1),
   address: z.string().min(1),
-  category: z.string().min(1),
+  category: z.string(),
   latitude: z.number(),
   longitude: z.number(),
-  link: z.string().url(),
+  link: z.string(),
 });
 
 export const SearchResponseSchema = z.object({

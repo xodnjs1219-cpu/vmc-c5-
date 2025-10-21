@@ -1,19 +1,15 @@
 import axios, { type AxiosInstance } from 'axios';
 
 /**
- * Naver Search API 응답 좌표계 (KATECH/GRS80)를 WGS84로 변환
- * KATECH는 한국 표준 좌표계이며, WGS84(GPS)로 변환 필요
+ * Naver Search API 응답 좌표를 WGS84로 변환
+ * Naver Local Search API는 경위도 * 10,000,000 형태로 반환
  */
-function katech2wgs84(x: number, y: number): { latitude: number; longitude: number } {
-  // 간단한 근사값 변환 (정확한 변환은 더 복잡함)
-  // Naver의 좌표계는 실제로 EPSG:5179 (GRS80)
-  // 여기서는 대략적인 오프셋만 적용 (실제는 공식 라이브러리 사용 권장)
-  const lon = x / 10000000 + 0.0;
-  const lat = y / 10000000 + 0.0;
-
+function convertNaverCoords(mapx: number, mapy: number): { latitude: number; longitude: number } {
+  // mapx는 경도(longitude), mapy는 위도(latitude)
+  // 10,000,000으로 나누어 실제 좌표로 변환
   return {
-    latitude: lat,
-    longitude: lon,
+    latitude: mapy / 10000000,
+    longitude: mapx / 10000000,
   };
 }
 
@@ -89,7 +85,7 @@ export class NaverSearchClient {
       }
 
       return response.data.items.map((item) => {
-        const { latitude, longitude } = katech2wgs84(item.mapx, item.mapy);
+        const { latitude, longitude } = convertNaverCoords(item.mapx, item.mapy);
         return {
           name: this.stripHtmlTags(item.title),
           address: this.stripHtmlTags(item.address),
@@ -101,14 +97,26 @@ export class NaverSearchClient {
       });
     } catch (error) {
       if (axios.isAxiosError(error)) {
+        // 상세한 에러 로깅
+        console.error('Naver Search API Error:', {
+          status: error.response?.status,
+          data: error.response?.data,
+          message: error.message,
+          code: error.code,
+        });
+
         if (error.code === 'ECONNABORTED') {
           throw new Error('SEARCH_TIMEOUT_ERROR');
         }
         if (error.response?.status === 400) {
           throw new Error('SEARCH_QUERY_INVALID');
         }
+        if (error.response?.status === 401 || error.response?.status === 403) {
+          throw new Error('SEARCH_AUTH_ERROR');
+        }
         throw new Error('SEARCH_API_ERROR');
       }
+      console.error('Unknown search error:', error);
       throw new Error('SEARCH_API_ERROR');
     }
   }
