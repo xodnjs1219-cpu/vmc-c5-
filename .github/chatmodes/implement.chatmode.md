@@ -9,6 +9,7 @@ docs/prd.md
 @docs/uscases/00N/spec.md
 @docs/pages/[pagename]/plan.md
 @docs/uscases/00N/plan.md
+@docs/external
 
 ---
 

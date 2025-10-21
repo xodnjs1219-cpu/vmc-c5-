@@ -8,6 +8,7 @@ import {
   QueryClientProvider,
 } from "@tanstack/react-query";
 import { ThemeProvider } from "next-themes";
+import { NavermapsProvider } from 'react-naver-maps';
 
 function makeQueryClient() {
   return new QueryClient({
@@ -45,14 +46,16 @@ export default function Providers({ children }: { children: React.ReactNode }) {
   const queryClient = getQueryClient();
 
   return (
-    <ThemeProvider
-      attribute="class"
-      defaultTheme="system"
-      enableSystem
-      forcedTheme="light"
-      disableTransitionOnChange
-    >
-      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
-    </ThemeProvider>
+    <NavermapsProvider ncpClientId={process.env.NEXT_PUBLIC_NCP_CLIENT_ID!}>
+      <ThemeProvider
+        attribute="class"
+        defaultTheme="system"
+        enableSystem
+        forcedTheme="light"
+        disableTransitionOnChange
+      >
+        <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+      </ThemeProvider>
+    </NavermapsProvider>
   );
 }
