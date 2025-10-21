@@ -31,32 +31,42 @@
 
 #### 2.2. 설치 및 세팅 방법
 
-  * **설치:** React(Next.js) 환경에서는 `react-naver-maps` 래퍼(wrapper) 라이브러리 사용을 권장합니다.
+  * **설치:** 별도 라이브러리 설치 없이 네이티브 Naver Maps JavaScript API를 직접 사용합니다.
     ```bash
-    # 1. 메인 라이브러리 (필수)
-    npm install react-naver-maps
-
-    # 2. 타입스크립트 사용 시 (권장)
+    # 타입스크립트 사용 시 (권장)
     npm install --save-dev @types/navermaps
     ```
-  * **세팅:** 프로젝트 최상단(예: `/app/layout.tsx`)에서 `NavermapsProvider`로 `children`을 감싸 앱 전체에 SDK를 적용합니다.
+  * **세팅:** 프로젝트 최상단(예: `/app/layout.tsx`)에서 Script 태그로 Naver Maps SDK를 로드합니다.
     ```tsx
     // /app/layout.tsx
-    import { NavermapsProvider } from 'react-naver-maps';
+    import Script from "next/script";
 
     export default function RootLayout({ children }: { children: React.ReactNode }) {
       return (
-        <html lang="ko">
-          <body>
-            <NavermapsProvider
-              ncpClientId={process.env.NEXT_PUBLIC_NCP_CLIENT_ID!}
-            >
-              {children}
-            </NavermapsProvider>
+        <html lang="ko" suppressHydrationWarning>
+          <head>
+            <Script
+              strategy="beforeInteractive"
+              src={`https://oapi.map.naver.com/openapi/v3/maps.js?ncpKeyId=${process.env.NEXT_PUBLIC_NCP_CLIENT_ID}`}
+            />
+          </head>
+          <body className="antialiased font-sans" suppressHydrationWarning>
+            {children}
           </body>
         </html>
       );
     }
+    ```
+  * **타입 정의:** `src/types/naver-maps.d.ts` 파일에 전역 타입을 정의합니다.
+    ```typescript
+    // src/types/naver-maps.d.ts
+    declare global {
+      interface Window {
+        naver: typeof naver;
+      }
+    }
+
+    export {};
     ```
 
 #### 2.3. 인증정보 관리 방법
@@ -70,36 +80,165 @@
 
 #### 2.4. 호출 방법
 
-  * 지도가 필요한 컴포넌트를 `'use client'`로 선언하고 `useNavermaps`, `NaverMap`, `Marker` 등을 사용합니다.
+  * 지도가 필요한 컴포넌트를 `'use client'`로 선언하고 네이티브 `window.naver.maps` API를 사용합니다.
+  * **주의:** 스크립트 로딩 완료를 확인한 후 지도를 초기화해야 합니다.
+    
     ```tsx
-    // /app/components/MyMap.tsx
+    // /features/map/components/naver-map.tsx
     'use client';
 
-    import { Container as MapDiv, NaverMap, Marker, useNavermaps } from 'react-naver-maps';
+    import { useRouter } from 'next/navigation';
+    import { useEffect, useState } from 'react';
+    import { useQuery } from '@tanstack/react-query';
+    import { Loader2 } from 'lucide-react';
+    import { apiClient } from '@/lib/remote/api-client';
 
-    function MyMap() {
-      const navermaps = useNavermaps(); // naver.maps 객체 접근
-
-      return (
-        <MapDiv style={{ width: '100%', height: '400px' }}>
-          <NaverMap
-            defaultCenter={new navermaps.LatLng(37.5666, 126.9780)} // 서울시청
-            defaultZoom={15}
-          >
-            {/* (Flow 5) 마커 클릭 시 상세 페이지 이동 */}
-            <Marker
-              position={new navermaps.LatLng(37.5666, 126.9780)}
-              onClick={() => {
-                // router.push('/place/[placeId]') 등의 로직
-                alert('마커 클릭됨!');
-              }}
-            />
-          </NaverMap>
-        </MapDiv>
-      );
+    interface Place {
+      id: string;
+      name: string;
+      latitude: number;
+      longitude: number;
+      average_rating: number;
+      review_count: number;
     }
 
-    export default MyMap;
+    export function NaverMapComponent() {
+      const router = useRouter();
+      const [isMounted, setIsMounted] = useState(false);
+      const [isMapLoaded, setIsMapLoaded] = useState(false);
+
+      useEffect(() => {
+        setIsMounted(true);
+        
+        // 네이버 지도 스크립트 로드 확인
+        const checkNaverMaps = () => {
+          if (typeof window !== 'undefined' && window.naver && window.naver.maps) {
+            setIsMapLoaded(true);
+          } else {
+            setTimeout(checkNaverMaps, 100);
+          }
+        };
+        
+        checkNaverMaps();
+      }, []);
+
+      // 리뷰가 있는 모든 장소 조회
+      const { data: places = [], isLoading } = useQuery({
+        queryKey: ['places-with-reviews'],
+        queryFn: async () => {
+          try {
+            const response = await apiClient.get('/api/places');
+            return response.data.data || [];
+          } catch {
+            return [];
+          }
+        },
+        staleTime: 5 * 60 * 1000, // 5분 캐시
+        enabled: isMounted && isMapLoaded,
+      });
+
+      if (!isMounted || !isMapLoaded) {
+        return (
+          <div className="w-full h-96 flex items-center justify-center bg-muted rounded-lg">
+            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+          </div>
+        );
+      }
+
+      return <NaverMapContent places={places} isLoading={isLoading} router={router} />;
+    }
+
+    function NaverMapContent({ 
+      places, 
+      isLoading, 
+      router 
+    }: { 
+      places: Place[]; 
+      isLoading: boolean; 
+      router: ReturnType<typeof useRouter>;
+    }) {
+      const [map, setMap] = useState<naver.maps.Map | null>(null);
+      const [markers, setMarkers] = useState<naver.maps.Marker[]>([]);
+
+      useEffect(() => {
+        if (!window.naver || !window.naver.maps) return;
+
+        const mapDiv = document.getElementById('naverMap');
+        if (!mapDiv) return;
+
+        // 지도 생성
+        const defaultCenter = new window.naver.maps.LatLng(37.5665, 126.978);
+        const newMap = new window.naver.maps.Map(mapDiv, {
+          center: defaultCenter,
+          zoom: 11,
+        });
+
+        setMap(newMap);
+
+        return () => {
+          // 클린업
+          markers.forEach(marker => marker.setMap(null));
+          setMarkers([]);
+        };
+      }, []);
+
+      useEffect(() => {
+        if (!map || !window.naver || !window.naver.maps) return;
+
+        // 기존 마커 제거
+        markers.forEach(marker => marker.setMap(null));
+
+        // 새 마커 생성
+        const newMarkers = places.map((place) => {
+          const marker = new window.naver.maps.Marker({
+            position: new window.naver.maps.LatLng(place.latitude, place.longitude),
+            map: map,
+            title: place.name,
+          });
+
+          // (Flow 5) 마커 클릭 시 상세 페이지 이동
+          window.naver.maps.Event.addListener(marker, 'click', () => {
+            router.push(`/place/${place.id}`);
+          });
+
+          return marker;
+        });
+
+        setMarkers(newMarkers);
+      }, [map, places, router]);
+
+      return (
+        <div className="w-full space-y-4">
+          <div id="naverMap" style={{ width: '100%', height: '400px' }} className="rounded-lg overflow-hidden" />
+
+          {/* 장소 목록 */}
+          {isLoading ? (
+            <div className="flex items-center justify-center py-8">
+              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+            </div>
+          ) : places.length > 0 ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+              {places.slice(0, 6).map((place) => (
+                <button
+                  key={place.id}
+                  onClick={() => router.push(`/place/${place.id}`)}
+                  className="text-left p-3 border rounded-lg hover:bg-muted transition-colors"
+                >
+                  <div className="font-semibold text-foreground">{place.name}</div>
+                  <div className="text-xs text-muted-foreground mt-1">
+                    ⭐ {place.average_rating.toFixed(1)} ({place.review_count}개 리뷰)
+                  </div>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div className="text-center text-sm text-muted-foreground py-8">
+              아직 리뷰가 없습니다. 첫 리뷰를 작성해보세요!
+            </div>
+          )}
+        </div>
+      );
+    }
     ```
 
 -----
@@ -139,87 +278,202 @@
 
   * 호출은 2단계로 이루어집니다:
 
-    1.  **[서버]** Next.js API Route에서 Naver API를 호출 (Server-to-Server)
+    1.  **[서버]** Hono API Route에서 Naver API를 호출 (Server-to-Server)
     2.  **[클라이언트]** React 컴포넌트에서 위 1번의 API Route를 호출 (Client-to-Server)
 
-  * **1. [서버] API Route 생성 (`/app/api/search/route.ts`)**
+  * **1. [서버] Hono API Route 생성 (`/features/search/backend/route.ts`)**
 
     ```typescript
-    import { NextResponse } from 'next/server';
+    import { Hono } from 'hono';
+    import { searchPlaces } from './service';
+    import { SearchQuerySchema } from './schema';
+    import { SEARCH_ERRORS } from './error';
+    import { respond, success, failure } from '@/backend/http/response';
+    import { getConfig, getLogger, type AppEnv } from '@/backend/hono/context';
 
-    // 클라이언트의 GET 요청을 처리 (예: /api/search?query=강남역)
-    export async function GET(request: Request) {
-      const { searchParams } = new URL(request.url);
-      const query = searchParams.get('query');
+    export function registerSearchRoutes(app: Hono<AppEnv>) {
+      app.get('/api/search', async (c) => {
+        const logger = getLogger(c);
+        const config = getConfig(c);
 
-      if (!query) {
-        return NextResponse.json({ error: 'Query is required' }, { status: 400 });
+        try {
+          const query = c.req.query('query');
+
+          if (!query) {
+            const result = failure(
+              400,
+              SEARCH_ERRORS.SEARCH_QUERY_REQUIRED.code,
+              SEARCH_ERRORS.SEARCH_QUERY_REQUIRED.message
+            );
+            return respond(c, result);
+          }
+
+          // 쿼리 유효성 검증
+          const queryValidation = SearchQuerySchema.safeParse(query);
+          if (!queryValidation.success) {
+            const result = failure(
+              400,
+              SEARCH_ERRORS.SEARCH_QUERY_INVALID.code,
+              SEARCH_ERRORS.SEARCH_QUERY_INVALID.message
+            );
+            return respond(c, result);
+          }
+
+          // 검색 서비스 호출
+          const searchResult = await searchPlaces(query, {
+            clientId: config.naverClientId,
+            clientSecret: config.naverClientSecret,
+          });
+
+          if (!searchResult.success) {
+            const error = searchResult.error!;
+            const result = failure(error.statusCode as any, error.code, error.message);
+            return respond(c, result);
+          }
+
+          const result = success(searchResult.data, 200);
+          return respond(c, result);
+        } catch (error) {
+          logger.error('Search error:', error);
+          const result = failure(
+            500,
+            SEARCH_ERRORS.SEARCH_API_ERROR.code,
+            SEARCH_ERRORS.SEARCH_API_ERROR.message
+          );
+          return respond(c, result);
+        }
+      });
+    }
+    ```
+
+  * **2. [서버] 검색 서비스 로직 (`/features/search/backend/service.ts`)**
+
+    ```typescript
+    import { createNaverSearchClient } from '@/lib/external/naver-client';
+    import { SearchQuerySchema, SearchResponseSchema } from './schema';
+    import { SEARCH_ERRORS } from './error';
+
+    export async function searchPlaces(
+      query: string,
+      config: { clientId: string; clientSecret: string }
+    ) {
+      const queryValidation = SearchQuerySchema.safeParse(query);
+      if (!queryValidation.success) {
+        return {
+          success: false,
+          error: SEARCH_ERRORS.SEARCH_QUERY_INVALID,
+          data: null,
+        };
       }
 
-      const API_URL = `https://openapi.naver.com/v1/search/local.json?query=${encodeURIComponent(query)}&display=5`;
+      const validatedQuery = queryValidation.data;
 
       try {
-        const response = await fetch(API_URL, {
-          method: 'GET',
-          headers: {
-            // 인증 정보 (환경 변수에서 로드)
-            'X-Naver-Client-Id': process.env.NEXT_PUBLIC_NCP_CLIENT_ID!,
-            'X-Naver-Client-Secret': process.env.NCP_CLIENT_SECRET!,
-          },
-          cache: 'no-store', // 검색 결과는 캐시하지 않음
-        });
+        const client = createNaverSearchClient(config.clientId, config.clientSecret);
+        const results = await client.search(validatedQuery, 5);
 
-        if (!response.ok) {
-          throw new Error(`Naver API Error: ${response.status}`);
+        if (results.length === 0) {
+          return {
+            success: true,
+            error: null,
+            data: {
+              results: [],
+              total: 0,
+            },
+          };
         }
 
-        const data = await response.json();
-        return NextResponse.json(data.items); // 클라이언트에 결과 반환
+        const responseValidation = SearchResponseSchema.safeParse({
+          results,
+          total: results.length,
+        });
 
+        if (!responseValidation.success) {
+          console.error('Response validation failed:', {
+            errors: responseValidation.error.errors,
+            results: JSON.stringify(results, null, 2),
+          });
+          return {
+            success: false,
+            error: SEARCH_ERRORS.SEARCH_RESPONSE_INVALID,
+            data: null,
+          };
+        }
+
+        return {
+          success: true,
+          error: null,
+          data: responseValidation.data,
+        };
       } catch (error) {
-        return NextResponse.json({ error: 'API call failed' }, { status: 500 });
+        return {
+          success: false,
+          error: SEARCH_ERRORS.SEARCH_API_ERROR,
+          data: null,
+        };
       }
     }
     ```
 
-  * **2. [클라이언트] 검색 컴포넌트에서 호출 (`/app/page.tsx` 등)**
+  * **3. [클라이언트] 검색 컴포넌트에서 호출 (`/features/search/components/search-input.tsx`)**
 
     ```tsx
     'use client';
     import { useState } from 'react';
+    import { useSearchQuery } from '../hooks/useSearchQuery';
+    import { Input } from '@/components/ui/input';
+    import { Button } from '@/components/ui/button';
+    import { Search, Loader2 } from 'lucide-react';
 
-    function SearchComponent() {
+    export function SearchInput() {
       const [query, setQuery] = useState('');
-      const [results, setResults] = useState([]);
+      const { mutate: search, data, isPending } = useSearchQuery();
 
-      const handleSearch = async () => {
-        // (중요) 네이버 API가 아닌, 우리 서버의 API Route를 호출
-        const response = await fetch(`/api/search?query=${query}`); 
-        const data = await response.json();
-        
-        // (Flow 1) 검색 결과를 상태에 저장하여 배너로 표시
-        setResults(data); 
+      const handleSearch = () => {
+        if (query.trim().length >= 2) {
+          search(query);
+        }
+      };
+
+      const handleKeyPress = (e: React.KeyboardEvent) => {
+        if (e.key === 'Enter') {
+          handleSearch();
+        }
       };
 
       return (
-        <div>
-          <input 
-            type="text" 
-            value={query} 
-            onChange={(e) => setQuery(e.target.value)} 
-          />
-          <button onClick={handleSearch}>검색</button>
-          
-          {/* 검색 결과(배너) 렌더링 */}
-          <div>
-            {results.map((item: any) => (
-              <div key={item.link}>
-                <h4>{item.title.replace(/<[^>]*>?/g, "")}</h4>
-                <p>{item.address}</p>
-                {/* (Flow 1) 리뷰 작성 버튼 */}
-              </div>
-            ))}
+        <div className="w-full space-y-4">
+          <div className="flex gap-2">
+            <Input
+              type="text"
+              placeholder="장소를 검색하세요 (예: 강남역 맛집)"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyPress={handleKeyPress}
+              className="flex-1"
+            />
+            <Button onClick={handleSearch} disabled={isPending || query.trim().length < 2}>
+              {isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Search className="h-4 w-4" />
+              )}
+            </Button>
           </div>
+
+          {/* 검색 결과(배너) 렌더링 */}
+          {data && data.results.length > 0 && (
+            <div className="space-y-2">
+              {data.results.map((item) => (
+                <div key={item.link} className="p-3 border rounded-lg hover:bg-muted">
+                  <h4 className="font-semibold">{item.name}</h4>
+                  <p className="text-sm text-muted-foreground">{item.address}</p>
+                  <p className="text-xs text-muted-foreground">{item.category}</p>
+                  {/* (Flow 1) 리뷰 작성 버튼 */}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       );
     }
